@@ -202,10 +202,13 @@ bot.onText(/\/today|\/daily/, (msg) => {
   const estNow = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
   const estDateStr = estNow.toLocaleDateString('en-CA', { timeZone: TIMEZONE }); // YYYY-MM-DD
   
+  // SQLite stores timestamps in UTC. To filter by "today in EST", we need to
+  // convert the UTC timestamp to EST before extracting the date.
+  // EST = UTC - 5 hours (or -4 during EDT). Using '-5 hours' is a reasonable default.
   db.all(
     `SELECT ounces, timestamp, username 
      FROM feedings 
-     WHERE date(datetime(timestamp, 'utc')) = date(?)
+     WHERE date(timestamp, '-5 hours') = date(?)
      ORDER BY timestamp DESC`,
     [estDateStr],
     (err, rows) => {
