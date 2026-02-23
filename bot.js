@@ -32,7 +32,7 @@ function createTable() {
     CREATE TABLE IF NOT EXISTS feedings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ounces INTEGER NOT NULL,
-      timestamp DATETIME DEFAULT (datetime('now', 'localtime')),
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       user_id TEXT,
       username TEXT
     )
