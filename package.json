@@ -1,0 +1,18 @@
+{
+  "name": "baby-feeding-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for tracking baby feedings",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "sqlite3": "^5.1.7",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
