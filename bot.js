@@ -95,10 +95,11 @@ Just type a number (1-12) → logs ounces instantly
 /week or /weekly — Last 7 days summary  
 /month or /monthly — This month's stats
 /last — Most recent feeding
+/parents or /stats — Who's feeding stats
 
 *Tips:*
 • Both parents can use the same bot
-• I track who logged each feeding
+• I auto-track who logged each feeding
 • Valid range: 1-12 ounces per feeding`;
 
   bot.sendMessage(chatId, help, { parse_mode: 'Markdown' });
@@ -138,10 +139,11 @@ bot.on('message', (msg) => {
       
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const displayName = msg.from?.first_name || username;
       
       bot.sendMessage(
         chatId, 
-        `✅ *Logged ${ounces}oz* at ${timeStr}\n👤 ${username}`,
+        `✅ *Logged ${ounces}oz* at ${timeStr}\n👤 By: ${displayName}`,
         { parse_mode: 'Markdown' }
       );
     }
@@ -329,6 +331,54 @@ bot.onText(/\/last/, (msg) => {
         `🍼 *Last Feeding*\n\n${row.ounces}oz at ${timeStr}\n👤 ${row.username}\n🕐 ${ago}`,
         { parse_mode: 'Markdown' }
       );
+    }
+  );
+});
+
+// /parents or /stats command - shows feeding breakdown by parent
+bot.onText(/\/parents|\/stats/, (msg) => {
+  const chatId = msg.chat.id;
+  
+  db.all(
+    `SELECT 
+       username,
+       COUNT(*) as feedings,
+       SUM(ounces) as total_ounces,
+       MAX(timestamp) as last_feeding
+     FROM feedings 
+     GROUP BY username
+     ORDER BY total_ounces DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error('Database error:', err);
+        bot.sendMessage(chatId, '❌ Error fetching data.');
+        return;
+      }
+      
+      if (rows.length === 0) {
+        bot.sendMessage(chatId, '👨‍👩‍👧 *Parent Stats*\n\nNo feedings logged yet.', { parse_mode: 'Markdown' });
+        return;
+      }
+      
+      // Get overall stats
+      const totalAll = rows.reduce((sum, r) => sum + r.total_ounces, 0);
+      const countAll = rows.reduce((sum, r) => sum + r.feedings, 0);
+      
+      let message = `👨‍👩‍👧 *Parent Stats*\n\n`;
+      
+      rows.forEach((row, index) => {
+        const percent = ((row.total_ounces / totalAll) * 100).toFixed(0);
+        const lastTime = new Date(row.last_feeding);
+        const ago = timeAgo(lastTime);
+        message += `${index + 1}. *${row.username}*\n`;
+        message += `   ${row.total_ounces}oz • ${row.feedings} feedings • ${percent}%\n`;
+        message += `   Last: ${ago}\n\n`;
+      });
+      
+      message += `*Total: ${totalAll}oz* (${countAll} feedings)`;
+      
+      bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     }
   );
 });
