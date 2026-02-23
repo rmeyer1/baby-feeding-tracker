@@ -8,16 +8,21 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
+// Timezone configuration - EST/EDT (America/New_York)
+const TIMEZONE = 'America/New_York';
+
 // Initialize bot
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 console.log('🤱 Baby Feeding Bot started!');
 
-// Initialize SQLite database
+// Initialize SQLite database with local time support
 const db = new sqlite3.Database('./feedings.db', (err) => {
   if (err) {
     console.error('❌ Database error:', err);
   } else {
     console.log('✅ Connected to SQLite database');
+    // Enable local time mode for SQLite
+    db.run("PRAGMA timezone = '-05:00'");
     createTable();
   }
 });
@@ -27,7 +32,7 @@ function createTable() {
     CREATE TABLE IF NOT EXISTS feedings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ounces INTEGER NOT NULL,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      timestamp DATETIME DEFAULT (datetime('now', 'localtime')),
       user_id TEXT,
       username TEXT
     )
@@ -40,9 +45,20 @@ function createTable() {
   });
 }
 
-// Helper: format time ago
+// Helper: convert UTC or any date to EST/EDT
+function toEST(date) {
+  if (typeof date === 'string') {
+    date = new Date(date);
+  }
+  return new Date(date.toLocaleString('en-US', { timeZone: TIMEZONE }));
+}
+
+// Helper: format time ago in EST
 function timeAgo(date) {
-  const seconds = Math.floor((new Date() - date) / 1000);
+  const estDate = toEST(date);
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
+  const seconds = Math.floor((now - estDate) / 1000);
+  
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -52,13 +68,36 @@ function timeAgo(date) {
   return `${days}d ago`;
 }
 
-// Helper: format date nicely
-function formatDate(date) {
-  return date.toLocaleString('en-US', { 
+// Helper: format date nicely in EST
+function formatEST(date) {
+  const estDate = toEST(date);
+  return estDate.toLocaleString('en-US', { 
     month: 'short', 
     day: 'numeric', 
     hour: 'numeric', 
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: TIMEZONE
+  });
+}
+
+// Helper: format time only in EST
+function formatESTTime(date) {
+  const estDate = toEST(date);
+  return estDate.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    timeZone: TIMEZONE
+  });
+}
+
+// Helper: format date only in EST
+function formatESTDate(date) {
+  const estDate = toEST(date);
+  return estDate.toLocaleDateString('en-US', { 
+    weekday: 'short',
+    month: 'short', 
+    day: 'numeric',
+    timeZone: TIMEZONE
   });
 }
 
@@ -138,7 +177,7 @@ bot.on('message', (msg) => {
       }
       
       const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const timeStr = formatESTTime(now);
       const displayName = msg.from?.first_name || username;
       
       bot.sendMessage(
@@ -178,8 +217,7 @@ bot.onText(/\/today|\/daily/, (msg) => {
       
       let message = `📊 *Today's Feedings*\n\n`;
       rows.forEach(row => {
-        const time = new Date(row.timestamp);
-        const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const timeStr = formatESTTime(row.timestamp);
         message += `• ${row.ounces}oz at ${timeStr} — ${row.username}\n`;
       });
       
@@ -228,10 +266,10 @@ bot.onText(/\/week|\/weekly/, (msg) => {
       
       // Show last 7 days in order
       for (let i = 0; i < 7; i++) {
-        const d = new Date();
+        const d = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
         d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().split('T')[0];
-        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+        const dateStr = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: TIMEZONE });
         
         if (byDate[dateStr]) {
           message += `${dayName}: ${byDate[dateStr].total}oz (${byDate[dateStr].count})\n`;
@@ -316,15 +354,8 @@ bot.onText(/\/last/, (msg) => {
         return;
       }
       
-      const time = new Date(row.timestamp);
-      const timeStr = time.toLocaleString('en-US', { 
-        weekday: 'short',
-        month: 'short', 
-        day: 'numeric',
-        hour: 'numeric', 
-        minute: '2-digit'
-      });
-      const ago = timeAgo(time);
+      const timeStr = formatEST(row.timestamp);
+      const ago = timeAgo(row.timestamp);
       
       bot.sendMessage(
         chatId,
