@@ -28,6 +28,29 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
+const knownCommands = new Set(['/help', '/feed', '/daily', '/addfeeding']);
+
+function parseTimeInput(timeInput) {
+  const cleaned = timeInput.replace(/^"(.*)"$/, '$1').trim();
+  if (!cleaned) {
+    return { error: 'Please provide a time (e.g., "8:30 AM", 08:30, or 14:30).' };
+  }
+
+  const formats = ['h:mm a', 'h:mma', 'H:mm', 'HH:mm'];
+  const now = DateTime.local();
+
+  for (const format of formats) {
+    const parsed = DateTime.fromFormat(cleaned, format);
+    if (parsed.isValid) {
+      return {
+        value: parsed.set({ year: now.year, month: now.month, day: now.day })
+      };
+    }
+  }
+
+  return { error: 'Time format not recognized. Use formats like "8:30 AM", "08:30", or "14:30".' };
+}
+
 // Help command
 bot.onText(/\/help/, (msg) => {
   const chatId = msg.chat.id;
@@ -36,6 +59,7 @@ bot.onText(/\/help/, (msg) => {
 
 Commands:
 /feed <amount> - Record a feeding (e.g., /feed 4.5)
+/addfeeding <ounces> <time> - Record a feeding at a specific time (e.g., /addfeeding 3.5 "8:30 AM" or /addfeeding 4 08:30)
 /daily - Show today's feedings
 /help - Show this help message
 `;
@@ -70,6 +94,45 @@ bot.onText(/\/feed\s*(.*)/, (msg, match) => {
       bot.sendMessage(chatId, 'Sorry, there was an error recording the feeding. Please try again.');
     } else {
       const timeFormatted = DateTime.fromISO(timestamp).toLocaleString(DateTime.DATETIME_MED);
+      bot.sendMessage(chatId, `Feeding recorded: ${ounces} oz at ${timeFormatted}`);
+    }
+  });
+  stmt.finalize();
+});
+
+// Add feeding at a specific time
+bot.onText(/\/addfeeding\s*(.*)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const input = match[1].trim();
+
+  if (!input) {
+    bot.sendMessage(chatId, 'Usage: /addfeeding <ounces> <time> (e.g., /addfeeding 3.5 "8:30 AM")');
+    return;
+  }
+
+  const [ouncesPart, ...timeParts] = input.split(' ');
+  const ounces = parseFloat(ouncesPart);
+  const timeInput = timeParts.join(' ').trim();
+
+  if (isNaN(ounces) || ounces <= 0) {
+    bot.sendMessage(chatId, 'Please provide a valid positive number for ounces (e.g., /addfeeding 3.5 "8:30 AM")');
+    return;
+  }
+
+  const { value: parsedTime, error } = parseTimeInput(timeInput);
+  if (error) {
+    bot.sendMessage(chatId, error);
+    return;
+  }
+
+  const timestamp = parsedTime.toISO();
+  const stmt = db.prepare('INSERT INTO feedings (ounces, timestamp) VALUES (?, ?)');
+  stmt.run(ounces, timestamp, function(err) {
+    if (err) {
+      console.error('Error inserting feeding record:', err.message);
+      bot.sendMessage(chatId, 'Sorry, there was an error recording the feeding. Please try again.');
+    } else {
+      const timeFormatted = parsedTime.toLocaleString(DateTime.DATETIME_MED);
       bot.sendMessage(chatId, `Feeding recorded: ${ounces} oz at ${timeFormatted}`);
     }
   });
@@ -125,6 +188,10 @@ bot.onText(/\/daily/, (msg) => {
 bot.on('message', (msg) => {
   // Ignore messages that are handled by other listeners
   if (msg.text.startsWith('/')) {
+    const command = msg.text.split(' ')[0].split('@')[0];
+    if (knownCommands.has(command)) {
+      return;
+    }
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, 'Unknown command. Type /help to see available commands.');
   }
