@@ -128,6 +128,7 @@ bot.onText(/\/help/, (msg) => {
 
 *Logging:*
 Just type a number (1-12) → logs ounces instantly
+\/addfeeding \<oz\> \<time\> — Log a past feeding (e.g., \/addfeeding 4 "8:30 AM")
 
 *Reports:*
 /today or /daily — Today's feedings & total
@@ -434,6 +435,110 @@ bot.onText(/\/parents|\/stats/, (msg) => {
       message += `*Total: ${totalAll}oz* (${countAll} feedings)`;
       
       bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    }
+  );
+});
+
+// Helper: Parse time input string into EST timestamp
+function parseTimeInput(timeInput) {
+  const cleaned = timeInput.replace(/^"(.*)"$/, '$1').trim();
+  if (!cleaned) return { error: 'Please provide a time (e.g., "8:30 AM", 08:30, or 14:30).' };
+
+  // Try various time formats
+  const formats = [
+    { regex: /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i, parse: (m) => ({ hour: parseInt(m[1]), minute: parseInt(m[2]), ampm: m[3].toUpperCase() }) },
+    { regex: /^(\d{1,2}):(\d{2})$/, parse: (m) => ({ hour: parseInt(m[1]), minute: parseInt(m[2]), ampm: null }) },
+    { regex: /^(\d{1,2})(\d{2})$/, parse: (m) => ({ hour: parseInt(m[1]), minute: parseInt(m[2]), ampm: null }) },
+  ];
+
+  let parsed = null;
+  for (const fmt of formats) {
+    const match = cleaned.match(fmt.regex);
+    if (match) {
+      parsed = fmt.parse(match);
+      break;
+    }
+  }
+
+  if (!parsed) {
+    return { error: 'Time format not recognized. Use formats like "8:30 AM", "08:30", or "14:30".' };
+  }
+
+  // Build a timestamp for today in EST
+  const now = new Date();
+  const estNow = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
+  
+  let hour = parsed.hour;
+  const minute = parsed.minute;
+  
+  // Handle AM/PM
+  if (parsed.ampm === 'PM' && hour !== 12) hour += 12;
+  if (parsed.ampm === 'AM' && hour === 12) hour = 0;
+  
+  // Create timestamp in EST, then convert to UTC for storage
+  estNow.setHours(hour, minute, 0, 0);
+  const utcTimestamp = estNow.toISOString();
+  
+  return { value: utcTimestamp };
+}
+
+// /addfeeding command - Log a missed feeding at a specific time
+bot.onText(/\/addfeeding/, (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim();
+  
+  // Parse: /addfeeding <ounces> <time>
+  const parts = text.split(/\s+/);
+  if (parts.length < 3) {
+    bot.sendMessage(
+      chatId,
+      `📝 *Add Missed Feeding*
+
+Usage: \/addfeeding \<ounces\> \<time\>
+\nExamples:
+• \/addfeeding 4 "8:30 AM"
+• \/addfeeding 5 14:30
+• \/addfeeding 3.5 09:15`,
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+  
+  const ounces = parseFloat(parts[1]);
+  const timeStr = parts.slice(2).join(' ');
+  
+  if (isNaN(ounces) || ounces < 1 || ounces > 12) {
+    bot.sendMessage(chatId, '⚠️ Please enter ounces between 1 and 12.');
+    return;
+  }
+  
+  const { value: timestamp, error } = parseTimeInput(timeStr);
+  if (error) {
+    bot.sendMessage(chatId, `⚠️ ${error}`);
+    return;
+  }
+  
+  const userId = msg.from?.id?.toString();
+  const username = msg.from?.username || msg.from?.first_name || 'Parent';
+  
+  db.run(
+    'INSERT INTO feedings (ounces, timestamp, user_id, username) VALUES (?, ?, ?, ?)',
+    [ounces, timestamp, userId, username],
+    function(err) {
+      if (err) {
+        console.error('Error saving feeding:', err);
+        bot.sendMessage(chatId, '❌ Sorry, something went wrong. Try again.');
+        return;
+      }
+      
+      const timeDisplay = formatESTTime(timestamp);
+      const displayName = msg.from?.first_name || username;
+      
+      bot.sendMessage(
+        chatId,
+        `✅ *Logged ${ounces}oz* at ${timeDisplay}\n👤 By: ${displayName}\n🕐 Past feeding added`,
+        { parse_mode: 'Markdown' }
+      );
     }
   );
 });
