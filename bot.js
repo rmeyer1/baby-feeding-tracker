@@ -477,9 +477,19 @@ function parseTimeInput(timeInput) {
   
   // Create timestamp in EST, then convert to UTC for storage
   estNow.setHours(hour, minute, 0, 0);
-  const utcTimestamp = estNow.toISOString();
   
-  return { value: utcTimestamp };
+  // Convert to SQLite-compatible format: YYYY-MM-DD HH:MM:SS (UTC)
+  // SQLite stores DATETIME as text in this format
+  const year = estNow.getFullYear();
+  const month = String(estNow.getMonth() + 1).padStart(2, '0');
+  const day = String(estNow.getDate()).padStart(2, '0');
+  const hours = String(estNow.getHours()).padStart(2, '0');
+  const minutes = String(estNow.getMinutes()).padStart(2, '0');
+  const seconds = String(estNow.getSeconds()).padStart(2, '0');
+  
+  const sqliteTimestamp = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  
+  return { value: sqliteTimestamp };
 }
 
 // /addfeeding command - Log a missed feeding at a specific time
